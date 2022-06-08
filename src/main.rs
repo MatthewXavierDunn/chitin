@@ -4,6 +4,7 @@ use std::{io::{self, Write, BufRead, BufReader}, process::Command, env, fs::{Fil
 
 use ast::{Expr, Cmd, Combinator};
 use lexer::Lexer;
+use colored::Colorize;
 
 pub enum CommandResultVariants {
     Exit,
@@ -21,8 +22,10 @@ impl<'a> Runnable for Expr<'a> {
         match self {
             Self::NoOp => Ok(CommandResultVariants::Ok),
             Self::Seq(combinator, rest) => {
-                combinator.run(out)?;
-                rest.run(out)
+                match combinator.run(out)? {
+                    CommandResultVariants::Ok => rest.run(out),
+                    exit => Ok(exit),
+                }
             }
         }
     }
@@ -89,7 +92,7 @@ fn interactive() -> io::Result<()> {
     let mut stdout = io::stdout();
 
     loop {
-        stdout.write_all(b"myshell> ")?;
+        stdout.write_all(format!("{}", "myshell> ".red()).as_bytes())?;
         stdout.flush()?;
 
         buffer.clear();
