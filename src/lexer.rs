@@ -1,96 +1,137 @@
-use std::{iter::FilterMap, str::SplitWhitespace};
+use std::ops::{Deref, DerefMut};
+
+
+const RESERVED_OP: &[&'static str] = &[
+    ";",
+    ">>",
+    "|",
+];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Token<'a> {
-    Text(&'a str),
-    Seq,
-    Redirect,
-    RedirectAppend,
-    RedirectInsert,
-}
-
-impl<'a> From<&'a str> for Token<'a> {
-    fn from(s: &'a str) -> Self {
-        match s {
-            ";" => Self::Seq,
-            ">" => Self::Redirect,
-            ">>" => Self::RedirectAppend,
-            ">+" => Self::RedirectInsert,
-            _ => Self::Text(s),
-        }
-    }
+    Arg(&'a str),
+    Op(&'a str),
 }
 
 impl<'a> Token<'a> {
-    pub fn unwrap(self) -> &'a str {
+    pub fn is_arg(&self) -> bool {
         match self {
-            Self::Text(s) => s,
-            _ => panic!("tried to unwrap non-text token"),
+            Self::Arg(_) => true,
+            _ => false,
         }
     }
 
-    pub fn is_text(&self) -> bool {
+    pub fn is_op(&self) -> bool {
         match self {
-            Self::Text(_) => true,
+            Self::Op(_) => true,
             _ => false,
+        }
+    }
+
+    pub fn unwrap(self) -> &'a str {
+        *self
+    }
+}
+
+impl<'a> Deref for Token<'a> {
+    type Target = &'a str;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Arg(s) => s,
+            Self::Op(s) => s,
+        }
+    }
+}
+
+impl<'a> DerefMut for Token<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Arg(s) => s,
+            Self::Op(s) => s,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Lexer<'a> {
-    stream: FilterMap<SplitWhitespace<'a>, fn(&'a str) -> Option<&'a str>>,
-    delim: Option<&'a str>,
-    remain: Option<&'a str>,
+    input: &'a str,
+    delim: Option<Token<'a>>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            stream: input.split_whitespace().filter_map(|s| match s.trim() {
-                "" => None,
-                s => Some(s),
-            }),
+            input,
             delim: None,
-            remain: None,
         }
     }
-
-    fn find(&mut self, next: &'a str, pat: &'static str) -> Option<Token<'a>> {
-        Some(Token::from(match next.find(pat) {
-            Some(n) => {
-                let (mut next, remain) = next.split_at(n);
-                let (delim, remain) = remain.split_at(pat.len());
-                if next.is_empty() {
-                    next = delim;
-                } else {
-                    self.delim = Some(delim);
-                }
-                if !remain.is_empty() {
-                    self.remain = Some(remain);
-                }
-                next
-            }
-            None => next
-        }))
-    }
 }
-
 
 impl<'a> Iterator for Lexer<'a> {
     type Item = Token<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(next) = self.delim.take() {
-            return Some(Token::from(next));
+        if let Some(token) = self.delim.take() {
+            Some(token)
+        } else if self.input.is_empty() {
+            None
+        } else {
+            let mut found = None;
+            'chars: for i in 0..self.input.len() {
+                match self.input.get(i..) {
+                    Some(s) if s.starts_with(|c: char| c.is_whitespace()) => {
+                        found = Some((i, None));
+                        break;
+                    }
+                    _ => (),
+                }
+                for &op in RESERVED_OP {
+                    match self.input.get(i..i + op.len()) {
+                        Some(slice) if slice == op => {
+                            found = Some((i, Some(slice)));
+                            break 'chars;
+                        }
+                        _ => (),
+                    }
+                }
+            }
+            if let Some((i, tok_typ)) = found {
+                let mut slice;
+                (slice, self.input) = self.input.split_at(i);
+                if let Some(tok) = tok_typ {
+                    // delim
+                    if slice.is_empty() {
+                        // delim at start
+                        (slice, self.input) = self.input.split_at(tok.len());
+                        Some(Token::Op(slice))
+                    } else {
+                        // delim somewhere
+                        let delim_slice;
+                        (delim_slice, self.input) = self.input.split_at(tok.len());
+                        self.delim = Some(Token::Op(delim_slice));
+                        Some(Token::Arg(slice))
+                    }
+                } else {
+                    // whitespace
+                    if let Some((i, _)) = self.input.char_indices().find(|(_, c)| !c.is_whitespace()) {
+                        (_, self.input) = self.input.split_at(i);
+                    } else {
+                        self.input = "";
+                    }
+                    if slice.is_empty() {
+                        // whitespace at start
+                        self.next()
+                    } else {
+                        Some(Token::Arg(slice))
+                    }
+                }
+            } else {
+                // nothing found
+                let slice = self.input;
+                self.input = "";
+                Some(Token::Arg(slice))
+            }
         }
-        let next = match self.remain.take() {
-            None => self.stream.next(),
-            remain => remain,
-        }?;
-        self.find(next, ">>")
-            .or_else(|| self.find(next, ">+"))
-            .or_else(|| self.find(next, ">"))
-            .or_else(|| self.find(next, ";"))
     }
 }
