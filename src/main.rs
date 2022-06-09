@@ -6,12 +6,12 @@ use ast::{Expr, Cmd, Combinator};
 use lexer::Lexer;
 use colored::Colorize;
 
-pub enum CommandResultVariants {
+pub enum ResultKind {
     Exit,
     Ok,
 }
 
-type CommandResult = Result<CommandResultVariants, io::Error>;
+type CommandResult = Result<ResultKind, io::Error>;
 
 pub trait Runnable {
     fn run(self, out: &mut impl Write) -> CommandResult;
@@ -20,10 +20,10 @@ pub trait Runnable {
 impl<'a> Runnable for Expr<'a> {
     fn run(self, out: &mut impl Write) -> CommandResult {
         match self {
-            Self::NoOp => Ok(CommandResultVariants::Ok),
+            Self::NoOp => Ok(ResultKind::Ok),
             Self::Seq(combinator, rest) => {
                 match combinator.run(out)? {
-                    CommandResultVariants::Ok => rest.run(out),
+                    ResultKind::Ok => rest.run(out),
                     exit => Ok(exit),
                 }
             }
@@ -63,15 +63,24 @@ impl<'a> Runnable for Combinator<'a> {
 impl<'a> Runnable for Cmd<'a> {
     fn run(self, out: &mut impl Write) -> CommandResult {
         match self {
-            Cmd::NoOp => Ok(CommandResultVariants::Ok),
+            Cmd::NoOp => Ok(ResultKind::Ok),
             Cmd::Pwd => {
                 let dir = env::current_dir()?;
                 write!(out, "{}\n", dir.display())?;
-                Ok(CommandResultVariants::Ok)
+                Ok(ResultKind::Ok)
             },
-            Cmd::Cd(path) => {
-                env::set_current_dir(path)?;
-                Ok(CommandResultVariants::Ok)
+            Cmd::Cd(opt_path) => {
+                if let Some(path) = opt_path {
+                    env::set_current_dir(path)?;
+                    Ok(ResultKind::Ok)
+                } else {
+                    env::set_current_dir(
+                        env::var("HOME").map_err(
+                            |_| io::Error::new(io::ErrorKind::Other, "could not locate home directory")
+                        )?
+                    )?;
+                    Ok(ResultKind::Ok)
+                }
             }
             Cmd::Other(cmd, args) => {
                 let output = Command::new(cmd)
@@ -79,9 +88,9 @@ impl<'a> Runnable for Cmd<'a> {
                     .spawn()?
                     .wait_with_output()?;
                 out.write_all(output.stdout.as_slice())?;
-                Ok(CommandResultVariants::Ok)
+                Ok(ResultKind::Ok)
             }
-            Cmd::Exit => Ok(CommandResultVariants::Exit),
+            Cmd::Exit => Ok(ResultKind::Exit),
         }
     }
 }
@@ -92,7 +101,7 @@ fn interactive() -> io::Result<()> {
     let mut stdout = io::stdout();
 
     loop {
-        stdout.write_all(format!("{}", "myshell> ".red()).as_bytes())?;
+        write!(stdout, "{}", "chitin> ".bold())?;
         stdout.flush()?;
 
         buffer.clear();
@@ -101,13 +110,13 @@ fn interactive() -> io::Result<()> {
 
         match Expr::try_from(Lexer::new(input)) {
             Ok(comb) => match comb.run(&mut stdout) {
-                Ok(CommandResultVariants::Ok) => (),
+                Ok(ResultKind::Ok) => (),
                 Err(reason) => {
-                    write!(stdout, "{reason}\n")?;
+                    write!(stdout, "{}\n", reason.to_string().bright_red())?;
                 }
-                Ok(CommandResultVariants::Exit) => break,
+                Ok(ResultKind::Exit) => break,
             }
-            Err(reason) => write!(stdout, "{reason}\n")?,
+            Err(reason) => write!(stdout, "{}\n", reason.to_string().bright_red())?,
         }
     }
     Ok(())
@@ -122,17 +131,17 @@ fn batch(src: &String) -> io::Result<()> {
         if input.is_empty() {
             continue;
         }
-        write!(stdout, "{input}")?;
+        write!(stdout, "{}", input.bold())?;
 
         match Expr::try_from(Lexer::new(input.as_str())) {
             Ok(comb) => match comb.run(&mut stdout) {
-                Ok(CommandResultVariants::Ok) => (),
+                Ok(ResultKind::Ok) => (),
                 Err(reason) => {
-                    write!(stdout, "{reason}\n")?;
+                    write!(stdout, "{}\n", reason.to_string().bright_red().red())?;
                 }
-                Ok(CommandResultVariants::Exit) => break,
+                Ok(ResultKind::Exit) => break,
             }
-            Err(reason) => write!(stdout, "{reason}\n")?,
+            Err(reason) => write!(stdout, "{}\n", reason.to_string().bright_red())?,
         }
     }
     Ok(())

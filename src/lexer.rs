@@ -4,6 +4,8 @@ use std::ops::{Deref, DerefMut};
 const RESERVED_OP: &[&'static str] = &[
     ";",
     ">>",
+    ">",
+    ">+",
     "|",
 ];
 
