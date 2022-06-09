@@ -14,6 +14,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin"
+version = "0.1.0"
+dependencies = [
+ "colored",
+]
+
+[[package]]
 name = "colored"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -44,13 +51,6 @@ name = "libc"
 version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
-
-[[package]]
-name = "shell"
-version = "0.1.0"
-dependencies = [
- "colored",
-]
 
 [[package]]
 name = "winapi"
