@@ -55,17 +55,21 @@ impl<'a> FromLexer<'a> for Combinator<'a> {
     fn from_lexer(mut lexer: LexInput<'a>) -> LexOutput<'a, Self> {
         let cmd;
         (cmd, lexer) = Cmd::from_lexer(lexer)?;
-        Ok((match lexer.next_if(Token::is_op) {
-            Some(op) => {
-                let out = lexer.next_if(Token::is_arg).ok_or("expected argument")?.unwrap();
-                match *op {
-                    ">" => Self::Redirect(cmd, out),
-                    ">>" => Self::RedirectAppend(cmd, out),
-                    ">+" => Self::RedirectInsert(cmd, out),
-                    _ => panic!("unexpected operator"),
-                }
+        Ok((if let Some(op) = lexer.next_if(|t| match t {
+            Token::Op(">") => true,
+            Token::Op(">>") => true,
+            Token::Op(">+") => true,
+            _ => false,
+        }) {
+            let out = lexer.next_if(Token::is_arg).ok_or("expected argument")?.unwrap();
+            match *op {
+                ">" => Self::Redirect(cmd, out),
+                ">>" => Self::RedirectAppend(cmd, out),
+                ">+" => Self::RedirectInsert(cmd, out),
+                _ => panic!("unexpected operator"),
             }
-            None => Self::Identity(cmd),
+        } else {
+            Self::Identity(cmd)
         }, lexer))
     }
 }
@@ -73,7 +77,7 @@ impl<'a> FromLexer<'a> for Combinator<'a> {
 #[derive(Debug)]
 pub enum Cmd<'a> {
     Exit,
-    Cd(&'a str),
+    Cd(Option<&'a str>),
     Pwd,
     Other(&'a str, Vec<&'a str>),
     NoOp,
@@ -107,10 +111,10 @@ impl<'a> TryFrom<(&'a str, Vec<&'a str>)> for Cmd<'a> {
                     Err("wrong number of arguments supplied to 'exit'")
                 }
             "cd" =>
-                if args.len() == 1 {
-                    Ok(Self::Cd(args[0]))
-                } else {
-                    Err("wrong number of arguments supplied to 'cd'")
+                match args.len() {
+                    0 => Ok(Self::Cd(None)),
+                    1 => Ok(Self::Cd(Some(args[0]))),
+                    _ => Err("wrong number of arguments supplied to 'cd'"),
                 }
             "pwd" =>
                 if args.len() == 0 {
